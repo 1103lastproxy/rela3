@@ -11,31 +11,30 @@ const (
 	Version1 = 0x01
 )
 
-type CmdType uint8
+const (
+	// FUDP is a flag indicating that the request is UDP-oriented.
+	FUDP uint8 = 0x80
+)
 
 // request commands
 const (
-	CmdConnect   CmdType = 0x01
-	CmdBind      CmdType = 0x02
-	CmdAssociate CmdType = 0x03
-	CmdMask      CmdType = 0x0F
+	CONNECT   uint8 = 0x01
+	BIND      uint8 = 0x02
+	ASSOCIATE uint8 = 0x03
 
-	// FUDP is a command flag indicating that the request is UDP-oriented.
-	// DEPRECATED by network feature.
-	FUDP CmdType = 0x80
+	CmdMask uint8 = 0x0F
 )
 
 // response status list
 const (
-	StatusOK                  = 0x00
-	StatusBadRequest          = 0x01
-	StatusUnauthorized        = 0x02
-	StatusForbidden           = 0x03
-	StatusTimeout             = 0x04
-	StatusServiceUnavailable  = 0x05
-	StatusHostUnreachable     = 0x06
-	StatusNetworkUnreachable  = 0x07
-	StatusInternalServerError = 0x08
+	StatusOK                 = 0x00
+	StatusBadRequest         = 0x01
+	StatusUnauthorized       = 0x02
+	StatusForbidden          = 0x03
+	StatusTimeout            = 0x04
+	StatusServiceUnavailable = 0x05
+	StatusHostUnreachable    = 0x06
+	StatusNetworkUnreachable = 0x07
 )
 
 var (
@@ -45,20 +44,19 @@ var (
 // Request is a relay client request.
 //
 // Protocol spec:
-//
-//	+-----+-------------+----+---+-----+----+
-//	| VER |  CMD/FLAGS  | FEALEN | FEATURES |
-//	+-----+-------------+----+---+-----+----+
-//	|  1  |      1      |    2   |    VAR   |
-//	+-----+-------------+--------+----------+
+//	+-----+---------+----+---+-----+----+
+//	| VER |  FLAGS  | FEALEN | FEATURES |
+//	+-----+---------+----+---+-----+----+
+//	|  1  |    1    |    2   |    VAR   |
+//	+-----+---------+--------+----------+
 //
 //	VER - protocol version, 1 byte.
-//	CMD/FLAGS - command (low 4-bit) and flags (high 4-bit), 1 byte.
+//	FLAGS - flags, 1 byte.
 //	FEALEN - length of features, 2 bytes.
 //	FEATURES - feature list.
 type Request struct {
 	Version  uint8
-	Cmd      CmdType
+	Flags    uint8
 	Features []Feature
 }
 
@@ -75,7 +73,7 @@ func (req *Request) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 	req.Version = header[0]
-	req.Cmd = CmdType(header[1])
+	req.Flags = header[1]
 
 	flen := int(binary.BigEndian.Uint16(header[2:]))
 
@@ -92,11 +90,27 @@ func (req *Request) ReadFrom(r io.Reader) (n int64, err error) {
 	return
 }
 
+func (req *Request) readFeatures(b []byte) (err error) {
+	if len(b) == 0 {
+		return
+	}
+	br := bytes.NewReader(b)
+	for br.Len() > 0 {
+		var f Feature
+		f, err = ReadFeature(br)
+		if err != nil {
+			return
+		}
+		req.Features = append(req.Features, f)
+	}
+	return
+}
+
 func (req *Request) WriteTo(w io.Writer) (n int64, err error) {
 	var buf bytes.Buffer
 
 	buf.WriteByte(req.Version)
-	buf.WriteByte(byte(req.Cmd))
+	buf.WriteByte(req.Flags)
 	buf.Write([]byte{0, 0}) // placeholder for features length
 	n += 4
 
@@ -128,7 +142,6 @@ func (req *Request) WriteTo(w io.Writer) (n int64, err error) {
 // Response is a relay server response.
 //
 // Protocol spec:
-//
 //	+-----+--------+----+---+-----+----+
 //	| VER | STATUS | FEALEN | FEATURES |
 //	+-----+--------+----+---+-----+----+
