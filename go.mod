@@ -1,3 +1,3 @@
-module github.com/go-gost/relay
+module github.com/1103lastproxy/relay
 
 go 1.16
